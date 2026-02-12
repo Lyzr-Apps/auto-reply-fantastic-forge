@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { callAIAgent } from '@/lib/aiAgent'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -9,8 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
-import { Switch } from '@/components/ui/switch'
-import { Loader2, Mail, Send, Trash2, Save, RefreshCw, Search, Sparkles, Clock, User, CheckCircle2, Circle } from 'lucide-react'
+import { Loader2, Mail, Send, Trash2, Save, RefreshCw, Search, Sparkles, Clock, User, CheckCircle2, AlertCircle } from 'lucide-react'
 
 const AGENT_ID = '698e3c78d53462d090523340'
 
@@ -59,6 +58,7 @@ interface Email {
   timestamp: string
   isUnread: boolean
   needsReply: boolean
+  threadId?: string
   threadHistory?: string
 }
 
@@ -69,66 +69,7 @@ interface DraftResponse {
   confidence?: number
 }
 
-const SAMPLE_EMAILS: Email[] = [
-  {
-    id: '1',
-    sender: 'Sarah Mitchell',
-    senderEmail: 'sarah.mitchell@techcorp.com',
-    subject: 'Q1 Project Timeline Discussion',
-    preview: 'Hi there, I wanted to touch base regarding the upcoming Q1 project deadlines. We need to align on...',
-    content: 'Hi there,\n\nI wanted to touch base regarding the upcoming Q1 project deadlines. We need to align on the delivery schedule for the new features and ensure all stakeholders are on the same page.\n\nCould we schedule a meeting this week to discuss? I have availability on Tuesday afternoon or Thursday morning.\n\nBest regards,\nSarah',
-    timestamp: '2 hours ago',
-    isUnread: true,
-    needsReply: true
-  },
-  {
-    id: '2',
-    sender: 'David Chen',
-    senderEmail: 'david.chen@partners.io',
-    subject: 'Partnership Proposal - Review Requested',
-    preview: 'Hello, I hope this message finds you well. I am reaching out to discuss a potential partnership...',
-    content: 'Hello,\n\nI hope this message finds you well. I am reaching out to discuss a potential partnership opportunity between our organizations.\n\nWe have been following your work closely and believe there is significant synergy between our platforms. Would you be open to a brief call next week to explore this further?\n\nLooking forward to your thoughts.\n\nWarm regards,\nDavid Chen',
-    timestamp: '5 hours ago',
-    isUnread: true,
-    needsReply: true
-  },
-  {
-    id: '3',
-    sender: 'Jessica Torres',
-    senderEmail: 'j.torres@designstudio.com',
-    subject: 'Re: Brand Guidelines Update',
-    preview: 'Thanks for sharing the updated brand guidelines. I have reviewed the document and have a few questions...',
-    content: 'Thanks for sharing the updated brand guidelines. I have reviewed the document and have a few questions about the color palette usage in digital vs print materials.\n\nCould you clarify whether the accent colors are approved for primary CTA buttons, or should we stick with the main brand colors?\n\nAppreciate your help!\n\nJessica',
-    timestamp: '1 day ago',
-    isUnread: false,
-    needsReply: true
-  },
-  {
-    id: '4',
-    sender: 'Michael Roberts',
-    senderEmail: 'mroberts@consulting.com',
-    subject: 'Budget Approval - Action Needed',
-    preview: 'Urgent: We need your approval on the revised budget proposal by end of day today...',
-    content: 'Urgent: We need your approval on the revised budget proposal by end of day today to move forward with the vendor contracts.\n\nThe updated figures are attached. Please review and confirm at your earliest convenience.\n\nThanks,\nMichael',
-    timestamp: '1 day ago',
-    isUnread: false,
-    needsReply: false
-  },
-  {
-    id: '5',
-    sender: 'Emily Watson',
-    senderEmail: 'emily.w@events.co',
-    subject: 'Conference Speaker Invitation',
-    preview: 'We would be honored to have you speak at our annual tech conference in June...',
-    content: 'We would be honored to have you speak at our annual tech conference in June. Your expertise in AI and automation would be incredibly valuable to our audience.\n\nThe event will be held June 15-17 in San Francisco. We cover all travel expenses and offer an honorarium for speakers.\n\nWould you be interested in discussing this opportunity further?\n\nBest,\nEmily Watson',
-    timestamp: '2 days ago',
-    isUnread: false,
-    needsReply: true
-  }
-]
-
 export default function Home() {
-  const [useSampleData, setUseSampleData] = useState(false)
   const [emails, setEmails] = useState<Email[]>([])
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -137,23 +78,10 @@ export default function Home() {
   const [draftMetadata, setDraftMetadata] = useState<DraftResponse | null>(null)
   const [showDraft, setShowDraft] = useState(false)
   const [isSending, setIsSending] = useState(false)
-  const [lastSynced, setLastSynced] = useState<string>('')
+  const [lastFetched, setLastFetched] = useState<string>('')
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (useSampleData) {
-      setEmails(SAMPLE_EMAILS)
-      setSelectedEmail(SAMPLE_EMAILS[0])
-      const now = new Date()
-      setLastSynced(now.toLocaleTimeString())
-    } else {
-      setEmails([])
-      setSelectedEmail(null)
-      setShowDraft(false)
-      setDraftContent('')
-      setDraftMetadata(null)
-    }
-  }, [useSampleData])
+  const [isFetchingEmails, setIsFetchingEmails] = useState(false)
+  const [fetchError, setFetchError] = useState<string>('')
 
   const filteredEmails = Array.isArray(emails) ? emails.filter(email => {
     if (!searchQuery) return true
@@ -164,6 +92,88 @@ export default function Home() {
       email?.preview?.toLowerCase().includes(query)
     )
   }) : []
+
+  const handleFetchEmails = async () => {
+    setIsFetchingEmails(true)
+    setActiveAgentId(AGENT_ID)
+    setFetchError('')
+
+    try {
+      const message = 'Fetch my recent emails from Gmail inbox. Return the last 20 emails with sender name, email address, subject, preview text, timestamp, thread ID, and whether it is unread.'
+
+      const result = await callAIAgent(message, AGENT_ID)
+
+      if (result?.success && result?.response?.result) {
+        const agentData = result.response.result
+
+        // Parse the response - the agent may return different structures
+        let fetchedEmails: Email[] = []
+
+        // Check if emails are in an array field
+        if (Array.isArray(agentData?.emails)) {
+          fetchedEmails = agentData.emails.map((email: any, index: number) => ({
+            id: email?.id ?? email?.thread_id ?? email?.message_id ?? `email-${index}`,
+            sender: email?.sender_name ?? email?.from_name ?? email?.sender ?? 'Unknown Sender',
+            senderEmail: email?.sender_email ?? email?.from_email ?? email?.email ?? '',
+            subject: email?.subject ?? 'No Subject',
+            preview: email?.preview ?? email?.snippet ?? email?.body_preview ?? email?.text?.substring(0, 150) ?? '',
+            content: email?.content ?? email?.body ?? email?.text ?? email?.preview ?? '',
+            timestamp: email?.timestamp ?? email?.date ?? email?.time ?? 'Recently',
+            isUnread: email?.is_unread ?? email?.unread ?? false,
+            needsReply: true,
+            threadId: email?.thread_id ?? email?.id ?? '',
+            threadHistory: email?.thread_history ?? ''
+          }))
+        } else if (Array.isArray(agentData?.messages)) {
+          fetchedEmails = agentData.messages.map((email: any, index: number) => ({
+            id: email?.id ?? email?.thread_id ?? email?.message_id ?? `email-${index}`,
+            sender: email?.sender_name ?? email?.from_name ?? email?.sender ?? 'Unknown Sender',
+            senderEmail: email?.sender_email ?? email?.from_email ?? email?.email ?? '',
+            subject: email?.subject ?? 'No Subject',
+            preview: email?.preview ?? email?.snippet ?? email?.body_preview ?? email?.text?.substring(0, 150) ?? '',
+            content: email?.content ?? email?.body ?? email?.text ?? email?.preview ?? '',
+            timestamp: email?.timestamp ?? email?.date ?? email?.time ?? 'Recently',
+            isUnread: email?.is_unread ?? email?.unread ?? false,
+            needsReply: true,
+            threadId: email?.thread_id ?? email?.id ?? '',
+            threadHistory: email?.thread_history ?? ''
+          }))
+        } else if (Array.isArray(agentData?.items)) {
+          fetchedEmails = agentData.items.map((email: any, index: number) => ({
+            id: email?.id ?? email?.thread_id ?? email?.message_id ?? `email-${index}`,
+            sender: email?.sender_name ?? email?.from_name ?? email?.sender ?? 'Unknown Sender',
+            senderEmail: email?.sender_email ?? email?.from_email ?? email?.email ?? '',
+            subject: email?.subject ?? 'No Subject',
+            preview: email?.preview ?? email?.snippet ?? email?.body_preview ?? email?.text?.substring(0, 150) ?? '',
+            content: email?.content ?? email?.body ?? email?.text ?? email?.preview ?? '',
+            timestamp: email?.timestamp ?? email?.date ?? email?.time ?? 'Recently',
+            isUnread: email?.is_unread ?? email?.unread ?? false,
+            needsReply: true,
+            threadId: email?.thread_id ?? email?.id ?? '',
+            threadHistory: email?.thread_history ?? ''
+          }))
+        }
+
+        if (fetchedEmails.length > 0) {
+          setEmails(fetchedEmails)
+          setSelectedEmail(fetchedEmails[0])
+          const now = new Date()
+          setLastFetched(now.toLocaleTimeString())
+          setFetchError('')
+        } else {
+          setFetchError('No emails found in your inbox. Try sending yourself a test email first.')
+        }
+      } else {
+        setFetchError('Failed to fetch emails. Please try again.')
+      }
+    } catch (error) {
+      console.error('Error fetching emails:', error)
+      setFetchError('An error occurred while fetching emails. Please check your Gmail connection and try again.')
+    } finally {
+      setIsFetchingEmails(false)
+      setActiveAgentId(null)
+    }
+  }
 
   const handleEmailClick = (email: Email) => {
     setSelectedEmail(email)
@@ -243,11 +253,6 @@ ${selectedEmail.threadHistory ? `Previous thread: ${selectedEmail.threadHistory}
     setDraftMetadata(null)
   }
 
-  const handleSync = () => {
-    const now = new Date()
-    setLastSynced(now.toLocaleTimeString())
-  }
-
   return (
     <div style={THEME_VARS} className="min-h-screen bg-background font-sans">
       {/* Header */}
@@ -262,16 +267,7 @@ ${selectedEmail.threadHistory ? `Previous thread: ${selectedEmail.threadHistory}
                 <h1 className="font-serif text-2xl font-semibold tracking-wide text-foreground">
                   Smart Email Assistant
                 </h1>
-                <p className="text-xs text-muted-foreground">AI-powered email management</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Sample Data</span>
-                <Switch
-                  checked={useSampleData}
-                  onCheckedChange={setUseSampleData}
-                />
+                <p className="text-xs text-muted-foreground">AI-powered email management with Gmail</p>
               </div>
             </div>
           </div>
@@ -280,7 +276,7 @@ ${selectedEmail.threadHistory ? `Previous thread: ${selectedEmail.threadHistory}
 
       {/* Main Content */}
       <div className="container mx-auto px-6 py-6">
-        {!useSampleData ? (
+        {emails.length === 0 ? (
           <Card className="border-border bg-card shadow-lg">
             <CardContent className="flex flex-col items-center justify-center py-16">
               <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-primary/10">
@@ -290,12 +286,36 @@ ${selectedEmail.threadHistory ? `Previous thread: ${selectedEmail.threadHistory}
                 Welcome to Smart Email Assistant
               </h2>
               <p className="mb-6 max-w-md text-center leading-relaxed text-muted-foreground">
-                Enable Sample Data to see how AI can help you manage your emails efficiently. Generate professional replies, analyze email content, and streamline your workflow.
+                Connect to your Gmail inbox to start managing emails with AI. Generate professional replies, analyze email content, and streamline your workflow.
               </p>
-              <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-4 py-2">
+              <Button
+                onClick={handleFetchEmails}
+                disabled={isFetchingEmails}
+                className="bg-accent text-accent-foreground hover:bg-accent/90"
+                size="lg"
+              >
+                {isFetchingEmails ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Fetching Your Emails...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="mr-2 h-5 w-5" />
+                    Fetch My Emails
+                  </>
+                )}
+              </Button>
+              {fetchError && (
+                <div className="mt-4 flex items-center gap-2 rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <span>{fetchError}</span>
+                </div>
+              )}
+              <div className="mt-6 flex items-center gap-2 rounded-lg bg-muted/50 px-4 py-2">
                 <Sparkles className="h-4 w-4 text-accent" />
                 <span className="text-sm text-muted-foreground">
-                  Toggle Sample Data above to get started
+                  Click &quot;Fetch My Emails&quot; to load your inbox
                 </span>
               </div>
             </CardContent>
@@ -311,11 +331,21 @@ ${selectedEmail.threadHistory ? `Previous thread: ${selectedEmail.threadHistory}
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={handleSync}
-                      className="border-border"
+                      onClick={handleFetchEmails}
+                      disabled={isFetchingEmails}
+                      className="border-border bg-accent text-accent-foreground hover:bg-accent/90"
                     >
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      Sync
+                      {isFetchingEmails ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Fetching...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          Fetch My Emails
+                        </>
+                      )}
                     </Button>
                   </div>
                   <div className="relative">
@@ -327,10 +357,16 @@ ${selectedEmail.threadHistory ? `Previous thread: ${selectedEmail.threadHistory}
                       className="border-border bg-background pl-10"
                     />
                   </div>
-                  {lastSynced && (
+                  {lastFetched && (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Clock className="h-3 w-3" />
-                      Last synced: {lastSynced}
+                      Last fetched: {lastFetched}
+                    </div>
+                  )}
+                  {fetchError && (
+                    <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                      <AlertCircle className="h-3 w-3" />
+                      <span>{fetchError}</span>
                     </div>
                   )}
                 </CardHeader>
@@ -361,9 +397,6 @@ ${selectedEmail.threadHistory ? `Previous thread: ${selectedEmail.threadHistory}
                                   New
                                 </Badge>
                               )}
-                              {email.needsReply && (
-                                <Circle className="h-2 w-2 fill-accent text-accent" />
-                              )}
                             </div>
                           </div>
                           <h4 className={`mb-1 text-sm ${email.isUnread ? 'font-semibold' : 'font-medium'}`}>
@@ -377,7 +410,7 @@ ${selectedEmail.threadHistory ? `Previous thread: ${selectedEmail.threadHistory}
                       ))
                     ) : (
                       <div className="py-8 text-center text-sm text-muted-foreground">
-                        No emails found
+                        No emails found matching your search
                       </div>
                     )}
                   </div>
@@ -402,8 +435,12 @@ ${selectedEmail.threadHistory ? `Previous thread: ${selectedEmail.threadHistory}
                               <User className="h-4 w-4" />
                               <span>{selectedEmail.sender}</span>
                             </div>
-                            <span>•</span>
-                            <span>{selectedEmail.senderEmail}</span>
+                            {selectedEmail.senderEmail && (
+                              <>
+                                <span>•</span>
+                                <span>{selectedEmail.senderEmail}</span>
+                              </>
+                            )}
                             <span>•</span>
                             <span>{selectedEmail.timestamp}</span>
                           </div>
@@ -550,36 +587,34 @@ ${selectedEmail.threadHistory ? `Previous thread: ${selectedEmail.threadHistory}
         )}
 
         {/* Agent Status */}
-        {useSampleData && (
-          <Card className="mt-6 border-border bg-card/50 shadow-sm">
-            <CardContent className="py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Sparkles className="h-5 w-5 text-accent" />
-                  <div>
-                    <h4 className="text-sm font-medium text-foreground">Email Assistant Agent</h4>
-                    <p className="text-xs text-muted-foreground">
-                      Analyzes emails and generates professional draft replies
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {activeAgentId === AGENT_ID ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin text-accent" />
-                      <span className="text-xs font-medium text-accent">Processing</span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="h-4 w-4 text-accent" />
-                      <span className="text-xs text-muted-foreground">Ready</span>
-                    </>
-                  )}
+        <Card className="mt-6 border-border bg-card/50 shadow-sm">
+          <CardContent className="py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Sparkles className="h-5 w-5 text-accent" />
+                <div>
+                  <h4 className="text-sm font-medium text-foreground">Email Assistant Agent</h4>
+                  <p className="text-xs text-muted-foreground">
+                    Fetches Gmail emails and generates professional draft replies
+                  </p>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        )}
+              <div className="flex items-center gap-2">
+                {activeAgentId === AGENT_ID ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin text-accent" />
+                    <span className="text-xs font-medium text-accent">Processing</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="h-4 w-4 text-accent" />
+                    <span className="text-xs text-muted-foreground">Ready</span>
+                  </>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   )
