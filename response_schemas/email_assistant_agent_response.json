@@ -1,0 +1,24 @@
+{
+  "agent_name": "Email Assistant Agent",
+  "agent_id": "698e3c78d53462d090523340",
+  "description": "Reads incoming emails, analyzes content and context, and generates appropriate draft replies based on email content and user's communication patterns",
+  "agent_type": "json",
+  "accessor": "result",
+  "auto_generated": true,
+  "response_schema": {
+    "result": {
+      "draft_reply": "string",
+      "summary": "string",
+      "tone": "string",
+      "confidence": "number"
+    }
+  },
+  "example_response": {
+    "result": {
+      "draft_reply": "The generated email draft",
+      "summary": "Brief summary of what the reply addresses",
+      "tone": "Detected tone: professional, casual, urgent, etc.",
+      "confidence": 0
+    }
+  }
+}
